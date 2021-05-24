@@ -1,0 +1,85 @@
+---
+title: 'Replication and Extension for Rural seed sector development through  participation among household bean producers in Western Uganda Paper'
+author: "Sona Vardanyan and Ha Tran Nguyen Phuong"
+output: html_document 
+---
+
+
+```{r}
+#get required library
+library(readxl)
+library(MatchIt)
+library(Matching)
+library(rbounds)
+library(MASS)
+library(dplyr)
+library(janitor)
+library(cobalt)
+library(quantreg)
+library(devtools)
+#devtools::install_github("Ngendahimana/sensitivityR5", force=TRUE)
+library(SensitivityR5)
+
+set.seed(123)
+```
+
+```{r}
+#load dataframe
+df <- read_excel("02.SeedSectorData.xlsx") %>% clean_names() %>% remove_empty()
+#change treatment variable to boolean
+df$treatment = ifelse(df$affiliation == "Af", 1, 0)
+head(df)
+
+```
+
+```{r}
+#Replication of Table 4
+#Unmatched difference 
+MatchBalance(treatment ~ av_age + under6 + over60 + hh_size + prop_eat + prop_all + too_weak + too_alone + paid_people + volunteers, data = df)
+
+```
+```{r}
+#using nearest neighbor matching 
+nn.mout <- matchit(treatment ~ av_age + under6 + over60 + hh_size + prop_eat + prop_all + too_weak + too_alone + paid_people + volunteers, data = df, estimand = "ATT", method = "nearest")
+
+#print matching improvement
+summary(nn.mout)
+bal.tab(nn.mout)
+
+#plot balance between covariates before and after matching
+love.plot(nn.mout, abs=TRUE, var.order = "adjusted", line = TRUE, stats= c("ks.statistics", "abs difference"))
+
+#calculate treatment effect using simulation
+z.out <- zelig(i1 ~ treatment + av_age + under6 + over60 + hh_size + prop_eat + prop_all + too_weak + too_alone + paid_people + volunteers, data = match.data(nn.mout), model = "ls")
+x.out <- setx(z.out, data = match.data(nn.out, "treat"), cond = TRUE)
+s.out <- sim(z.out, x = x.out)
+
+summary(s.out)
+```
+
+```{r}
+#using genetic matching
+gen.mout <- matchit(treatment ~ av_age + under6 + over60 + hh_size + prop_eat + prop_all + too_weak + too_alone + paid_people + volunteers, data = df, estimand = "ATT", method = "genetic", print.level = 0, pop.size = 1000, unif.seed=112,  int.seed=112)
+
+#print matching improvement
+summary(gen.mout)
+print(bal.tab(gen.mout))
+
+#plot balance between covariates before and after matching
+love.plot(gen.mout, abs=TRUE, var.order = "adjusted", line = TRUE, stats = "ks.statistics")
+
+#calculate treatment effect using simulation
+gen.z.out <- zelig(i1 ~ treatment + av_age + under6 + over60 + hh_size + prop_eat + prop_all + too_weak + too_alone + paid_people + volunteers, data = match.data(gen.mout), model = "ls")
+gen.x.out <- setx(gen.z.out, data = match.data(gen.mout, "treat"), cond = TRUE)
+gen.s.out <- sim(gen.z.out, x = gen.x.out)
+
+summary(gen.s.out)
+```
+
+```{r}
+#sensitivity analysis for genetic matching
+pens2(x = gen.mout, y="i1",Gamma = 5, GammaInc = 0.1, est = 0.5987271)
+#sensitivity analysis for nearest neighbor matching
+pens2(x = nn.mout, y="i1",Gamma = 7, GammaInc = 0.1, est = 0.5057401)
+
+```
